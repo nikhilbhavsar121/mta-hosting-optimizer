@@ -1,0 +1,40 @@
+name: Go Build and Test
+
+on: [push]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Setup Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.17
+    - name: Build
+      run: go build -o mta-host-optimizer
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: mta-host-optimizer
+        path: mta-host-optimizer
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Setup Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.17
+    - name: Restore artifacts
+      uses: actions/download-artifact@v2
+      with:
+        name: mta-host-optimizer
+    - name: Test
+      run: go test ./...

@@ -1,27 +1,34 @@
 package models
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 )
 
-type Hostname struct {
-	Hostname string `json:"hostname"`
-}
-
 type IPConfig struct {
-	IP       string `json:"ip"`
-	HostName string `json:"hostname"`
-	Active   bool   `json:"active"`
+	IP       string
+	Hostname string
+	Active   bool
 }
 
-func GetInefficientHost(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+type MockIPConfigService struct{}
 
+func (s MockIPConfigService) GetIPConfig() []IPConfig {
+	return []IPConfig{
+		{"127.0.0.1", "mta-prod-1", true},
+		{"127.0.0.2", "mta-prod-1", false},
+		{"127.0.0.3", "mta-prod-2", true},
+		{"127.0.0.4", "mta-prod-2", true},
+		{"127.0.0.5", "mta-prod-2", false},
+		{"127.0.0.6", "mta-prod-3", false},
+	}
+}
+
+func GetInefficientHost1(w http.ResponseWriter, r *http.Request) {
+	service := MockIPConfigService{}
 	xStr := os.Getenv("THRESHOLDX")
 	if xStr == "" {
 		xStr = "1"
@@ -30,81 +37,32 @@ func GetInefficientHost(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	rows, err := db.Query("SELECT Hostname FROM ipconfig  GROUP BY Hostname HAVING SUM(Active) <= ?", x)
 
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
+	// Get IP configuration data from mock service
+	ipConfig := service.GetIPConfig()
 
-	var results []Hostname
-	for rows.Next() {
-		var h Hostname
-		err := rows.Scan(&h.Hostname)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+	// Collect hostnames with less than or equal to X active IP addresses
+	hostnames := make(map[string]int)
+	for _, row := range ipConfig {
+
+		if _, ok := hostnames[row.Hostname]; !ok && !row.Active {
+			hostnames[row.Hostname] = 0
+		} else if row.Active {
+			hostnames[row.Hostname]++
 		}
-		results = append(results, h)
+
+	}
+	var result []string
+	for hostname, activeIPs := range hostnames {
+		if activeIPs <= x {
+			result = append(result, hostname)
+		}
 	}
 
-	jsonData, err := json.Marshal(results)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// Marshal and write result as JSON
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonData)
-}
-
-func CreateHost(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-
-	var ipconfigs []IPConfig
-	err := json.NewDecoder(r.Body).Decode(&ipconfigs)
-	if err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	for _, ipconfig := range ipconfigs {
-
-		_, err := db.ExecContext(r.Context(), `
-			INSERT INTO ipconfig (ip, hostname, active)
-			VALUES (?, ?, ?)
-		`, ipconfig.IP, ipconfig.HostName, ipconfig.Active)
-		if err != nil {
-			http.Error(w, "Failed to create ipconfig", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		err = json.NewEncoder(w).Encode(ipconfig)
-		if err != nil {
-			http.Error(w, "Failed to encode ipconfig JSON", http.StatusInternalServerError)
-			return
-		}
-	}
-}
-
-func DeleteAllIPS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-
-	stmt, err := db.Prepare("DELETE FROM ipconfig")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
-
-	res, err := stmt.Exec()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Fprintf(w, "Deleted %d ips record(s)", rowsAffected)
 }

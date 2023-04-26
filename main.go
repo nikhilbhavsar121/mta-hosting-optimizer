@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"mta-hosting-optimizer/routes"
-	"mta-hosting-optimizer/utils"
 	"net/http"
 	"os"
 
@@ -16,16 +15,7 @@ import (
 func main() {
 	LoadConfig()
 
-	conn, dbErr := utils.GetDBConnection()
-
-	if dbErr != nil {
-		fmt.Println("Cannot connect to database", dbErr)
-		return
-	}
-
-	defer conn.Close()
-
-	routes.SetupRoutes(conn)
+	routes.SetupRoutes()
 	port := os.Getenv("PORT")
 
 	log.Fatal(http.ListenAndServe(":"+port, nil))
